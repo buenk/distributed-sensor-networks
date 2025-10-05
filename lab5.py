@@ -208,6 +208,11 @@ class SensorNode:
             self.window.writeln(
                 f"{self.position};{self.value};{self.strength};{self.ip};{self.port}"
             )
+        elif cmd == "ping":
+            self.send_ping(self.mcast_addr)
+        elif cmd == "list":
+            for location, neighbour in self.neighbours.items():
+                self.window.writeln(f"{location};{neighbour.distance}")
 
 
 # Additional parameters to this function must always have a default value.
