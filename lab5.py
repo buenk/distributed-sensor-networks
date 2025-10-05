@@ -2,8 +2,8 @@
 Networks and Network Security
 Lab 5 - Distributed Sensor Network
 
-NAME:
-STUDENT ID:
+NAME: Ezra Buenk
+STUDENT ID: 15187814
 
 DESCRIPTION:
 
@@ -15,6 +15,7 @@ from random import randint, gauss
 from gui import MainWindow
 import sensor
 from tkinter import TclError
+import math
 
 
 # Get random position in NxN grid.
@@ -22,6 +23,14 @@ def random_position(n):
     x = randint(0, n)
     y = randint(0, n)
     return (x, y)
+
+
+def calculate_distance(point_a, point_b):
+    dx = point_b[0] - point_a[0]
+    dy = point_b[1] - point_a[1]
+
+    distance = math.hypot(dx, dy)
+    return distance
 
 
 # Additional parameters to this function must always have a default value.
