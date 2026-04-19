@@ -5,8 +5,8 @@ Lab 5 - Distributed Sensor Network
 NAME: Ezra Buenk
 STUDENT ID: 15187814
 
-DESCRIPTION:
-
+DESCRIPTION: Implementation of a distributed sensor network with peer
+discovery and echo wave algorithms.
 """
 
 from random import randint, gauss
@@ -25,6 +25,17 @@ import time
 
 @dataclass
 class Neighbour:
+    """
+    Represents a neighbouring sensor node with network information.
+
+    Attributes:
+        ip (str): IP address of the neighbour.
+        port (int): Port number of the neighbour.
+        strength (int): Signal strength of the neighbour.
+        distance (float): Calculated distance to the neighbour.
+        last_seen (float): Timestamp when neighbour was last heard from.
+    """
+
     ip: str
     port: int
     strength: int
@@ -34,11 +45,22 @@ class Neighbour:
 
 @dataclass
 class Wave:
+    """
+    Represents an echo wave state.
+
+    Attributes:
+        children_waiting (set[tuple[int, int]]): Set of child positions still
+            waiting for replies.
+        operation (int): The operation type for this wave.
+        parent (tuple[int, int] | None): Position of the parent node that sent
+            this wave.
+        payload_sum (int): Accumulated payload for size calculation operations.
+    """
+
     children_waiting: set[tuple[int, int]]
     operation: int = sensor.OP_NOOP
     parent: tuple[int, int] | None = None
     payload_sum: int = 0
-    target: tuple[int, int] | None = None
 
 
 # Get random position in NxN grid.
@@ -57,6 +79,27 @@ def calculate_distance(point_a, point_b):
 
 
 class SensorNode:
+    """
+    Main sensor node that participates in a distributed sensor network.
+
+    Handles neighbour discovery via ping/pong, processes echo wave algorithms,
+    and provides a GUI interface.
+
+    Attributes:
+        mcast_addr (tuple[str, int]): Multicast address for network
+            communication.
+        position (tuple[int, int]): Grid position of the sensor.
+        strength (int): Signal strength of sensor.
+        value (float): Sensor measurement value.
+        ping_period (float): Time interval between periodic pings.
+        grid_size (int): Size of the network grid.
+        neighbours (dict[tuple[int, int], Neighbour]): Discovered neighbouring
+            sensors.
+        ip (str): Local IP address.
+        port (int): Local port number.
+        window (MainWindow): GUI interface instance.
+    """
+
     def __init__(
         self, mcast_addr, position, strength, value, ping_period, grid_size
     ):
@@ -75,6 +118,13 @@ class SensorNode:
         self.window = None
 
     def start(self):
+        """
+        Initialize the sensor node and start the main event loop.
+
+        Sets up network sockets, GUI interface, and begins listening for
+        network messages and user commands.
+        """
+
         self.peer_messenger.start()
         self.listener.start()
 
@@ -100,12 +150,16 @@ class SensorNode:
                 self._periodic_ping()
                 self._handle_gui_commands()
 
-            # TODO: the periodic ping
-
         except TclError:
             pass
 
     def _handle_incoming_messages(self):
+        """Process incoming network messages from multicast and peer sockets.
+
+        Polls both sockets for incoming data and then decodes the messages and
+        sends them to appropriate handlers based on message type.
+        """
+
         sockets = [self.listener.socket, self.peer_messenger.socket]
 
         # Read any incoming messages
@@ -127,9 +181,11 @@ class SensorNode:
             elif message_type == sensor.MSG_ECHO:
                 self.wave_controller.handle_echo(message, address)
             elif message_type == sensor.MSG_ECHO_REPLY:
-                self.wave_controller.handle_echo_reply(message, address)
+                self.wave_controller.handle_echo_reply(message)
 
     def _periodic_ping(self):
+        """Send periodic ping messages and clean up stale neighbours."""
+
         now = time.time()
         if self.ping_period > 0 and now >= self.next_ping_at:
             self.peer_messenger.send_ping(
@@ -174,6 +230,18 @@ class SensorNode:
             )
 
     def _handle_gui_commands(self):
+        """Process user commands from the GUI interface. Parses the input.
+
+        Handles commands like:
+            properties,
+            ping,
+            list,
+            move,
+            strength,
+            echo,
+            size
+        """
+
         line = self.window.getline()
         if not line:
             return
@@ -189,9 +257,13 @@ class SensorNode:
                 self.mcast_addr, self.position, self.position, self.strength
             )
         elif cmd == "list":
-            for location, neighbour in self.neighbours.items():
+            sorted_neighbours = sorted(
+                self.neighbours.items(),
+                key=lambda x: x[1].distance,
+                reverse=True,
+            )
+            for location, neighbour in sorted_neighbours:
                 self.window.writeln(f"{location};{neighbour.distance}")
-                # TODO: Order this by nearest
         elif cmd == "move":
             x = int(parts[1])
             y = int(parts[2])
@@ -216,11 +288,28 @@ class SensorNode:
 
 
 class MulticastListener:
+    """
+    Handles multicast socket operations for receiving ping messages. This
+    includes joining the multicast group and receiving messages from other
+    sensors.
+
+    Attributes:
+        mcast_addr (tuple[str, int]): Multicast address to listen on.
+        _sock (socket.socket | None): The multicast socket instance.
+    """
+
     def __init__(self, mcast_addr):
         self.mcast_addr = mcast_addr
         self._sock = None
 
     def start(self):
+        """
+        Initialize and bind the multicast socket.
+
+        Creates the multicast socket and binds to the specified multicast
+        address.
+        """
+
         # Create the multicast listener socket.
         self._sock = socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
@@ -243,6 +332,14 @@ class MulticastListener:
             self._sock.bind(self.mcast_addr)
 
     def poll(self):
+        """
+        Receive and decode messages from the multicast socket.
+
+        Returns:
+            tuple[decoded_message, address]: The decoded message and sender
+                address, or None if decoding fails.
+        """
+
         data, address = self._sock.recvfrom(4096)
 
         try:
@@ -261,14 +358,29 @@ class MulticastListener:
 
 
 class PeerMessenger:
+    """
+    Handles peer-to-peer socket operations for sending and receiving messages.
+    This class manages the UDP socket for direct communication with other
+    sensors, namely ping/pong messagse and echo wave messages.
+
+    Attributes:
+        _sock (socket.socket | None): The UDP socket.
+    """
+
     def __init__(self):
         self._sock = None
 
     def start(self):
+        """
+        Initialize and bind the peer-to-peer UDP socket using a random port.
+        """
+
         # Create the peer-to-peer socket.
         self._sock = socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
         )
+
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         # Set the socket multicast TTL so it can send multicast messages.
         self._sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 5)
@@ -280,6 +392,14 @@ class PeerMessenger:
             self._sock.bind(("", socket.INADDR_ANY))
 
     def poll(self):
+        """
+        Receive and decode messages from the multicast socket.
+
+        Returns:
+            tuple[decoded_message, address]: The decoded message and sender
+                address, or None if decoding fails.
+        """
+
         data, address = self._sock.recvfrom(4096)
 
         try:
@@ -380,6 +500,19 @@ class PeerMessenger:
 
 
 class EchoWaveController:
+    """
+    Controls echo wave propagation algorithms in the network.
+    Manages the start, propagation and termination of the echo waves used
+    for things such as network size calculation.
+
+    Attributes:
+        node (SensorNode): Reference to the parent sensor node.
+        msg (PeerMessenger): Reference to the messaging system.
+        log (callable): Logging function for the GUI.
+        waves_sent (int): Counter of initiated waves.
+        ongoing_waves (dict): State containing active waves.
+    """
+
     def __init__(self, node: SensorNode, messenger: PeerMessenger, log):
         self.node = node
         self.msg = messenger
@@ -388,6 +521,14 @@ class EchoWaveController:
         self.ongoing_waves: dict[tuple[tuple[int, int], int], Wave] = {}
 
     def start_echo_wave(self, operation=sensor.OP_NOOP):
+        """
+        Starts an echo wave propagation algorithm that will travel the
+        network and return information about network structure.
+
+        Args:
+            operation (int): The type of wave operation to perform.
+        """
+
         children = set(self.node.neighbours.keys())
         origin = self.node.position
         print(f"{origin} - Initiating echo wave.")
@@ -417,8 +558,19 @@ class EchoWaveController:
         self.waves_sent += 1
 
     def handle_echo(self, decoded_message, address):
-        initiator_position = decoded_message[2]
+        """
+        Process an incoming ECHO message and propagate or respond to the wave.
+        Handles echo wave propagation by either replying immediately if we're
+        already participating, or forwariding the wave to the child nodes and
+        keeping the wave state until all children have responded.
+
+        Args:
+            decoded_message (list): The decoded message data.
+            address (tuple[str, int]): Address of the sender.
+        """
+
         sequence_number = decoded_message[1]
+        initiator_position = decoded_message[2]
         sender_position = decoded_message[3]
         operation = decoded_message[5]
 
@@ -483,9 +635,17 @@ class EchoWaveController:
         )
         print(f"{origin} - Already participating in wave, sent echo reply.")
 
-    def handle_echo_reply(self, decoded_message, address):
-        initiator_position = decoded_message[2]
+    def handle_echo_reply(self, decoded_message):
+        """
+        Process an incoming ECHO_REPLY message and propagate the wave.
+        Also accumulates payload data for size calculations, and forwards
+        replies up the wave tree until reaching the origin node.
+
+        Args:
+            decoded_message (list): The decoded ECHO_REPLY message data.
+        """
         sequence_number = decoded_message[1]
+        initiator_position = decoded_message[2]
         sender_position = decoded_message[3]
         operation = decoded_message[5]
         payload = decoded_message[7]
