@@ -5,7 +5,8 @@ Lab 5 - Distributed Sensor Network
 NAME: Ezra Buenk
 STUDENT ID: 15817814
 
-DESCRIPTION: Definitions and message format
+DESCRIPTION: Definitions and message format for the distributed sensor networks
+lab.
 """
 
 import struct
@@ -21,9 +22,6 @@ MSG_ECHO_REPLY = 3  # Unicast echo reply.
 OP_NOOP = 0  # Do nothing.
 OP_SIZE = 1  # Compute the size of network.
 OP_UPDATE = 2  # Force update the network.
-OP_ROUTE_HOPS = 3
-OP_ROUTE_STRENGTH = 4
-OP_ROUTE_FETCH = 5
 
 # This is used to pack message fields into a binary format.
 message_format = struct.Struct("!iiiiiiiiiif")
